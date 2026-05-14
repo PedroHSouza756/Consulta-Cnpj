@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+
+  <title>Consulta CNPJ</title>
+
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+
+<body class="bg-slate-950">
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState } = React;
+
+function App() {
+  const [cnpj, setCnpj] = useState("");
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [showJson, setShowJson] = useState(false);
+
+  function formatCNPJ(value = "") {
+    return value
+      .replace(/\D/g, "")
+      .replace(/^(\d{2})(\d)/, "$1.$2")
+      .replace(/^(\d{2})\.(\d{3})(\d)/, "$1.$2.$3")
+      .replace(/\.(\d{3})(\d)/, ".$1/$2")
+      .replace(/(\d{4})(\d)/, "$1-$2")
+      .slice(0, 18);
+  }
+
+  async function consultar() {
+    const clean = cnpj.replace(/\D/g, "");
+
+    if (clean.length !== 14) {
+      setError("Digite um CNPJ válido.");
+      return;
+    }
+
+    setLoading(true);
+    setError("");
+    setData(null);
+
+    try {
+      const response = await fetch(
+        `https://publica.cnpj.ws/cnpj/${clean}`
+      );
+
+      if (!response.ok) {
+        throw new Error("CNPJ não encontrado.");
+      }
+
+      const json = await response.json();
+
+      const cidade =
+        json?.estabelecimento?.cidade?.nome
+          ?.toLowerCase()
+          ?.normalize("NFD")
+          ?.replace(/[\u0300-\u036f]/g, "");
+
+      const isCampinas = cidade === "campinas";
+
+      let campinasData = null;
+
+      if (isCampinas) {
+        const atividade =
+          json?.estabelecimento?.atividade_principal;
+
+        campinasData = {
+          municipio: "Campinas",
+          codigo_atividade:
+            atividade?.id ||
+            atividade?.subclasse ||
+            "-",
+
+          cnae_municipal:
+            atividade?.descricao || "-",
+
+          inscricao_municipal:
+            json?.estabelecimento?.inscricao_municipal ||
+            json?.inscricao_municipal ||
+            "Não encontrado"
+        };
+      }
+
+      json._campinas = campinasData;
+
+      setData(json);
+
+    } catch (err) {
+      console.error(err);
+
+      setError(
+        err.message || "Erro ao consultar."
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function getIE() {
+    const ies =
+      data?.estabelecimento?.inscricoes_estaduais;
+
+    if (!ies || !ies.length) {
+      return "-";
+    }
+
+    return ies
+      .map(item => item.inscricao_estadual)
+      .filter(Boolean)
+      .join(" • ");
+  }
+
+  function getEndereco() {
+    const e = data?.estabelecimento;
+
+    if (!e) return "-";
+
+    return `
+${e.tipo_logradouro || ""}
+${e.logradouro || ""},
+${e.numero || "S/N"}
+${e.complemento ? "- " + e.complemento : ""}
+• ${e.bairro || ""}
+• ${e.cidade?.nome || ""}
+ / ${e.estado?.sigla || ""}
+• CEP: ${e.cep || "-"}
+    `;
+  }
+
+  function copyJson() {
+    navigator.clipboard.writeText(
+      JSON.stringify(data, null, 2)
+    );
+
+    alert("JSON copiado!");
+  }
+
+  return (
+    <div className="min-h-screen bg-slate-950 text-white">
+
+      <div className="max-w-7xl mx-auto px-4 py-10">
+
+        <div className="mb-10">
+
+          <div className="inline-flex items-center gap-3 bg-blue-500/10 border border-blue-500/20 rounded-full px-5 py-2 mb-5">
+            <div className="w-3 h-3 rounded-full bg-blue-400 animate-pulse"></div>
+
+            <span className="text-blue-300 text-sm font-medium">
+              Consulta Empresarial
+            </span>
+          </div>
+
+          <h1 className="text-5xl font-black tracking-tight bg-gradient-to-r from-blue-300 to-cyan-400 bg-clip-text text-transparent">
+            Consulta CNPJ
+          </h1>
+
+          <p className="mt-4 text-slate-400 text-lg">
+            Consulta completa com IE, IM, endereço e CNAE Campinas
+          </p>
+
+        </div>
+
+        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl shadow-blue-950/30">
+
+          <div className="flex flex-col md:flex-row gap-4">
+
+            <input
+              type="text"
+              placeholder="00.000.000/0000-00"
+              value={formatCNPJ(cnpj)}
+              onChange={(e) => setCnpj(e.target.value)}
+              className="flex-1 bg-slate-950 border border-slate-700 rounded-2xl px-5 py-4 text-lg outline-none focus:border-blue-500 transition"
+            />
+
+            <button
+              onClick={consultar}
+              disabled={loading}
+              className="bg-gradient-to-r from-blue-500 to-cyan-500 hover:opacity-90 transition text-white font-bold rounded-2xl px-8 py-4 disabled:opacity-50 shadow-lg shadow-blue-900/40"
+            >
+              {loading ? "Consultando..." : "Consultar"}
+            </button>
+
+          </div>
+
+          {error && (
+            <div className="mt-5 bg-red-500/10 border border-red-500/30 rounded-2xl p-4 text-red-300">
+              {error}
+            </div>
+          )}
+
+        </div>
+
+        {data && (
+          <>
+
+            <div className="grid gap-5 lg:grid-cols-3 mt-8">
+
+              <Card
+                title="Razão Social"
+                value={data.razao_social}
+              />
+
+              <Card
+                title="Nome Fantasia"
+                value={data.estabelecimento?.nome_fantasia}
+              />
+
+              <Card
+                title="Situação"
+                value={data.estabelecimento?.situacao_cadastral}
+              />
+
+              <Card
+                title="CNPJ"
+                value={formatCNPJ(data.cnpj || "")}
+              />
+
+              <Card
+                title="Inscrição Estadual"
+                value={getIE()}
+              />
+
+              <Card
+                title="Inscrição Municipal"
+                value={
+                  data?._campinas?.inscricao_municipal ||
+                  data?.estabelecimento?.inscricao_municipal ||
+                  "-"
+                }
+              />
+
+              <Card
+                title="Telefone"
+                value={
+                  data.estabelecimento?.telefone1 || "-"
+                }
+              />
+
+              <Card
+                title="E-mail"
+                value={
+                  data.estabelecimento?.email || "-"
+                }
+              />
+
+              <Card
+                title="Cidade / UF"
+                value={`${data.estabelecimento?.cidade?.nome || "-"} / ${data.estabelecimento?.estado?.sigla || "-"}`}
+              />
+
+              <Card
+                title="CNAE Principal"
+                value={
+                  data.estabelecimento?.atividade_principal?.descricao || "-"
+                }
+              />
+
+              <Card
+                title="Código CNAE"
+                value={
+                  data.estabelecimento?.atividade_principal?.id || "-"
+                }
+              />
+
+              {data._campinas && (
+                <>
+                  <Card
+                    title="CNAE Campinas"
+                    value={data._campinas.cnae_municipal}
+                  />
+
+                  <Card
+                    title="Código Atividade Campinas"
+                    value={data._campinas.codigo_atividade}
+                  />
+
+                  <Card
+                    title="Município Especial"
+                    value="Campinas"
+                  />
+                </>
+              )}
+
+            </div>
+
+            <div className="mt-8 bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-xl shadow-blue-950/20">
+
+              <h2 className="text-2xl font-bold mb-5 text-blue-300">
+                Endereço Completo
+              </h2>
+
+              <div className="bg-slate-950 border border-slate-800 rounded-2xl p-6 text-lg leading-8 whitespace-pre-line text-slate-200">
+                {getEndereco()}
+              </div>
+
+            </div>
+
+            <div className="mt-8 bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-xl shadow-blue-950/20">
+
+              <div className="flex justify-between items-center mb-5">
+
+                <h2 className="text-2xl font-bold text-blue-300">
+                  Inscrições Estaduais
+                </h2>
+
+                <div className="text-sm text-slate-400">
+                  {data.estabelecimento?.inscricoes_estaduais?.length || 0} registro(s)
+                </div>
+
+              </div>
+
+              <div className="space-y-4">
+
+                {data.estabelecimento?.inscricoes_estaduais?.length ? (
+                  data.estabelecimento.inscricoes_estaduais.map((ie, index) => (
+                    <div
+                      key={index}
+                      className="bg-slate-950 border border-slate-800 rounded-2xl p-4"
+                    >
+
+                      <div className="grid md:grid-cols-3 gap-4">
+
+                        <Mini
+                          label="IE"
+                          value={ie.inscricao_estadual}
+                        />
+
+                        <Mini
+                          label="UF"
+                          value={ie.estado?.sigla}
+                        />
+
+                        <Mini
+                          label="Ativo"
+                          value={ie.ativo ? "Sim" : "Não"}
+                        />
+
+                      </div>
+
+                    </div>
+                  ))
+                ) : (
+                  <div className="bg-slate-950 border border-slate-800 rounded-2xl p-5 text-slate-400">
+                    Nenhuma IE encontrada.
+                  </div>
+                )}
+
+              </div>
+
+            </div>
+
+            <div className="mt-8 flex gap-4 flex-wrap">
+
+              <button
+                onClick={() => setShowJson(!showJson)}
+                className="bg-slate-900 border border-slate-700 rounded-2xl px-5 py-3 hover:border-blue-500 transition"
+              >
+                {showJson ? "Ocultar JSON" : "Ver JSON"}
+              </button>
+
+              <button
+                onClick={copyJson}
+                className="bg-gradient-to-r from-blue-500 to-cyan-500 hover:opacity-90 transition rounded-2xl px-5 py-3 font-bold text-white"
+              >
+                Copiar JSON
+              </button>
+
+            </div>
+
+            {showJson && (
+              <div className="mt-8 bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden">
+
+                <div className="border-b border-slate-800 px-6 py-4">
+                  <h2 className="text-2xl font-bold text-blue-300">
+                    JSON Completo
+                  </h2>
+                </div>
+
+                <pre className="p-6 overflow-auto text-sm text-cyan-300 whitespace-pre-wrap">
+                  {JSON.stringify(data, null, 2)}
+                </pre>
+
+              </div>
+            )}
+
+          </>
+        )}
+
+      </div>
+
+    </div>
+  );
+}
+
+function Card({ title, value }) {
+  return (
+    <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-lg shadow-blue-950/10">
+
+      <div className="text-slate-400 text-sm">
+        {title}
+      </div>
+
+      <div className="mt-3 text-lg font-bold break-words text-slate-100">
+        {value || "-"}
+      </div>
+
+    </div>
+  );
+}
+
+function Mini({ label, value }) {
+  return (
+    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+
+      <div className="text-slate-500 text-sm">
+        {label}
+      </div>
+
+      <div className="mt-2 font-semibold break-words">
+        {value || "-"}
+      </div>
+
+    </div>
+  );
+}
+
+ReactDOM
+  .createRoot(document.getElementById("root"))
+  .render(<App />);
+</script>
+</body>
+</html>
